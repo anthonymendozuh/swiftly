@@ -24,6 +24,17 @@ const fmtTime = (min) => {
   return `${((h + 11) % 12) + 1}${m ? ":" + String(m).padStart(2, "0") : ""}${h < 12 ? "a" : "p"}`;
 };
 
+// older commitments were saved without a type, so guess it from the title
+const commitType = (e) => {
+  if (e.category && e.category !== "other") return e.category;
+  const t = e.title.toLowerCase();
+  if (/work|shift|job/.test(t)) return "work";
+  if (/class|lecture|lab|school|course|seminar/.test(t)) return "class";
+  if (/date|dinner|party|friend|family|birthday|hang|game|concert|movie/.test(t)) return "social";
+  if (/doctor|dentist|appoint|meeting|interview|therapy|vet|haircut/.test(t)) return "appointment";
+  return "other";
+};
+
 const aqiClass = (a) => (a <= 50 ? "good" : a <= 100 ? "moderate" : "bad");
 
 const icon = (code) =>
@@ -390,7 +401,7 @@ function Calendar({ week }) {
                 const top = ((Math.max(e.start_min, HOUR_START * 60) - HOUR_START * 60) / 60) * HOUR_PX;
                 const h = Math.max(((Math.min(e.end_min, HOUR_END * 60) - Math.max(e.start_min, HOUR_START * 60)) / 60) * HOUR_PX - 2, 18);
                 return (
-                  <div key={e.id} className={`ev ${e.kind === "fixed" ? `fixed t-${e.category}` : e.category}`} style={{ top, height: h }} title={`${e.title} ${fmtTime(e.start_min)}–${fmtTime(e.end_min)}${e.note ? "\n" + e.note : ""}`}>
+                  <div key={e.id} className={`ev ${e.kind === "fixed" ? `fixed t-${commitType(e)}` : e.category}`} style={{ top, height: h }} title={`${e.title} ${fmtTime(e.start_min)}–${fmtTime(e.end_min)}${e.note ? "\n" + e.note : ""}`}>
                     <b>{e.title}</b>
                     <span>{fmtTime(e.start_min)}–{fmtTime(e.end_min)}</span>
                     {e.note && (
