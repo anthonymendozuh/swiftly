@@ -130,7 +130,7 @@ function Planner({ week, reload, onLogout }) {
   useEffect(() => {
     if (!busy) return;
     setProgress(0);
-    const t = setInterval(() => setProgress((p) => Math.min(p + 1, PROGRESS.length - 1)), 3500);
+    const t = setInterval(() => setProgress((p) => (p + 1) % PROGRESS.length), 4000);
     return () => clearInterval(t);
   }, [busy]);
 
@@ -141,21 +141,45 @@ function Planner({ week, reload, onLogout }) {
     setMessages((m) => [...m, { role: "user", text: msg, display }]);
     setInput("");
     setBusy(true);
-    const r = await api("/api/agent", { message: msg, history });
-    setBusy(false);
-    if (r.status === 401) return onLogout();
-    if (!r.ok) {
-      setMessages((m) => [...m, { role: "assistant", text: r.data.error || "Something went wrong.", error: true }]);
-      return;
+
+    // big plans can take more than one request (serverless time limit). keep going automatically.
+    const steps = [];
+    let r;
+    for (let round = 0; round < 5; round++) {
+      r = round === 0
+        ? await api("/api/agent", { message: msg, history })
+        : await api("/api/agent", { continue: true, history: [...history, { role: "user", text: msg }, { role: "assistant", text: "(still working on it)" }] });
+      if (r.status === 401) {
+        setBusy(false);
+        return onLogout();
+      }
+      const timedOut = !r.ok && [502, 504].includes(r.status) && round < 4;
+      if (r.ok) steps.push(...(r.data.steps || []));
+      if (r.ok && !r.data.partial) break;
+      if (!r.ok && !timedOut) break;
+      reload(); // show progress on the calendar while it keeps working
     }
-    setMessages((m) => [...m, { role: "assistant", text: r.data.reply, steps: r.data.steps }]);
-    if (r.data.pending) setPending(r.data.pending);
+    setBusy(false);
+
+    if (!r.ok) {
+      setMessages((m) => [...m, { role: "assistant", text: r.data.error || "Something went wrong. Try again.", error: true, steps }]);
+    } else {
+      const reply = r.data.reply || (r.data.partial ? "I got most of it done. Check the calendar and tell me if anything's missing." : "Done.");
+      setMessages((m) => [...m, { role: "assistant", text: reply, steps }]);
+      if (r.data.pending) setPending(r.data.pending);
+    }
     reload();
   }
 
   async function decide(confirm) {
     const p = pending;
     setPending(null);
+    if (p.reset) {
+      if (!confirm) return;
+      const r = await api("/api/reset", {});
+      setMessages((m) => [...m, { role: "assistant", text: r.ok ? `✓ ${r.data.result}. You can undo this from the Activity log.` : r.data.error || "That didn't work.", error: !r.ok }]);
+      return reload();
+    }
     const r = await api("/api/confirm", { id: p.id, confirm });
     const text = r.ok ? (confirm ? `✓ Done: ${r.data.result}` : "Okay, I left everything as it was.") : r.data.error || "That didn't work.";
     setMessages((m) => [...m, { role: "assistant", text, error: !r.ok }]);
@@ -183,6 +207,13 @@ function Planner({ week, reload, onLogout }) {
           <span className="pill">📍 {week.user.city}</span>
           <button className="btn accent" onClick={() => send(RECHECK, "↻ Recheck my week")} disabled={busy}>↻ Recheck my week</button>
           <a className="btn" href="/api/ics">Export to calendar</a>
+          <button
+            className="btn ghost"
+            disabled={busy}
+            onClick={() => setPending({ reset: true, description: "Reset week: delete every commitment, planned block and task." })}
+          >
+            Reset week
+          </button>
           <button className="btn ghost" onClick={logout} title={week.user.email}>Log out</button>
         </div>
       </header>
@@ -259,7 +290,7 @@ function Planner({ week, reload, onLogout }) {
             <div className="warn-icon">!</div>
             <h3>Confirm this change</h3>
             <p>{pending.description}</p>
-            <p className="muted small">The agent asked to do this. It won't happen unless you confirm.</p>
+            <p className="muted small">{pending.reset ? "This clears your whole calendar. You can undo it from the Activity log." : "The agent asked to do this. It won't happen unless you confirm."}</p>
             <div className="modal-actions">
               <button className="btn" onClick={() => decide(false)}>Cancel</button>
               <button className="danger" onClick={() => decide(true)}>Yes, delete</button>

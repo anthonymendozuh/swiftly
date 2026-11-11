@@ -1,6 +1,6 @@
 import { db } from "../../../lib/db";
 import { currentUser } from "../../../lib/auth";
-import { runAgent } from "../../../lib/agent";
+import { runAgent, CONTINUE_MSG } from "../../../lib/agent";
 import { json, serverError, throttle } from "../../../lib/http";
 
 export const maxDuration = 60;
@@ -9,10 +9,11 @@ export async function POST(req) {
   try {
     const user = await currentUser(req);
     if (!user) return json({ error: "Please log in." }, 401);
-    if (!throttle("agent:" + user.id, 10)) return json({ error: "Slow down a little, try again in a minute." }, 429);
+    if (!throttle("agent:" + user.id, 20)) return json({ error: "Slow down a little, try again in a minute." }, 429);
 
-    const { message, history } = await req.json().catch(() => ({}));
-    const text = String(message || "").trim().slice(0, 2000);
+    const body = await req.json().catch(() => ({}));
+    const { history } = body;
+    const text = body.continue ? CONTINUE_MSG : String(body.message || "").trim().slice(0, 2000);
     if (!text) return json({ error: "Type a request first." }, 400);
 
     const sql = db();
