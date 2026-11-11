@@ -39,15 +39,16 @@ export default function Home() {
   const [week, setWeek] = useState(null);
   const [authed, setAuthed] = useState(null);
   const [loadError, setLoadError] = useState("");
+  const [weekIdx, setWeekIdx] = useState(0);
 
   const load = useCallback(async () => {
-    const r = await api("/api/week");
+    const r = await api(`/api/week?week=${weekIdx}`);
     if (r.status === 401) return setAuthed(false);
     if (!r.ok) return setLoadError(r.data.error || "Couldn't load your week.");
     setLoadError("");
     setAuthed(true);
     setWeek(r.data);
-  }, []);
+  }, [weekIdx]);
 
   useEffect(() => {
     load();
@@ -56,7 +57,7 @@ export default function Home() {
   if (authed === false) return <Auth onDone={load} />;
   if (loadError) return <div className="center"><div className="card"><h2>Setup needed</h2><p className="muted">{loadError}</p></div></div>;
   if (!week) return <div className="center muted">Loading…</div>;
-  return <Planner week={week} reload={load} onLogout={() => { setWeek(null); setAuthed(false); }} />;
+  return <Planner week={week} reload={load} weekIdx={weekIdx} setWeekIdx={setWeekIdx} onLogout={() => { setWeek(null); setAuthed(false); }} />;
 }
 
 function Auth({ onDone }) {
@@ -112,7 +113,12 @@ function Logo() {
   );
 }
 
-function Planner({ week, reload, onLogout }) {
+const fmtRange = (a, b) => {
+  const f = (d, opts) => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { timeZone: "UTC", ...opts });
+  return a.slice(5, 7) === b.slice(5, 7) ? `${f(a, { month: "short", day: "numeric" })} – ${+b.slice(8)}` : `${f(a, { month: "short", day: "numeric" })} – ${f(b, { month: "short", day: "numeric" })}`;
+};
+
+function Planner({ week, reload, weekIdx, setWeekIdx, onLogout }) {
   const [messages, setMessages] = useState([
     { role: "assistant", text: "Hey! Tell me your schedule and what you want to get done this week. I'll check the weather and plan it out." },
   ]);
@@ -262,8 +268,26 @@ function Planner({ week, reload, onLogout }) {
           <div className="tabs">
             <button aria-pressed={tab === "calendar"} onClick={() => setTab("calendar")}>Week</button>
             <button aria-pressed={tab === "log"} onClick={() => setTab("log")}>Activity log</button>
+            {tab === "calendar" && (
+              <div className="weeknav">
+                <button onClick={() => setWeekIdx(0)} disabled={weekIdx === 0} aria-label="This week">‹</button>
+                <span>
+                  <b>{weekIdx === 0 ? "This week" : "Next week"}</b> · {fmtRange(week.start, week.end)}
+                </span>
+                <button onClick={() => setWeekIdx(1)} disabled={weekIdx === 1} aria-label="Next week">›</button>
+              </div>
+            )}
             <div className="legend">
-              <span className="dot physical" />Physical <span className="dot mental" />Mental <span className="dot errand" />Errand <span className="dot fixed" />Commitment
+              <span className="lg-title">Plans</span>
+              <span><i className="sw physical" />Physical</span>
+              <span><i className="sw mental" />Mental</span>
+              <span><i className="sw errand" />Errand</span>
+              <span className="lg-sep" />
+              <span className="lg-title">Commitments</span>
+              <span><i className="sw fixed t-work" />Work</span>
+              <span><i className="sw fixed t-class" />Class</span>
+              <span><i className="sw fixed t-social" />Social</span>
+              <span><i className="sw fixed t-appointment" />Appt</span>
             </div>
           </div>
           {tab === "calendar" ? (
@@ -335,7 +359,7 @@ function Calendar({ week }) {
       <div className="cal-head">
         <div />
         {week.days.map((d) => (
-          <div key={d.date} className={`day-head${d.date === week.today ? " today" : ""}`}>
+          <div key={d.date} className={`day-head${d.date === week.today ? " today" : ""}${d.past ? " past" : ""}`}>
             <div className="dname">{d.label} <b>{+d.date.slice(8)}</b></div>
             {d.weather && (
               <div className={`wx${d.weather.rain_chance >= 50 ? " wet" : ""}`} title={d.weather.summary}>
@@ -358,7 +382,7 @@ function Calendar({ week }) {
           ))}
         </div>
         {week.days.map((d) => (
-          <div key={d.date} className={`col${d.date === week.today ? " today" : ""}`} style={{ height }}>
+          <div key={d.date} className={`col${d.date === week.today ? " today" : ""}${d.past ? " past" : ""}`} style={{ height }}>
             {hours.map((h) => <div key={h} className="line" style={{ top: (h - HOUR_START) * HOUR_PX }} />)}
             {week.events
               .filter((e) => e.date === d.date)
@@ -366,7 +390,7 @@ function Calendar({ week }) {
                 const top = ((Math.max(e.start_min, HOUR_START * 60) - HOUR_START * 60) / 60) * HOUR_PX;
                 const h = Math.max(((Math.min(e.end_min, HOUR_END * 60) - Math.max(e.start_min, HOUR_START * 60)) / 60) * HOUR_PX - 2, 18);
                 return (
-                  <div key={e.id} className={`ev ${e.kind === "fixed" ? "fixed" : e.category}`} style={{ top, height: h }} title={`${e.title} ${fmtTime(e.start_min)}–${fmtTime(e.end_min)}${e.note ? "\n" + e.note : ""}`}>
+                  <div key={e.id} className={`ev ${e.kind === "fixed" ? `fixed t-${e.category}` : e.category}`} style={{ top, height: h }} title={`${e.title} ${fmtTime(e.start_min)}–${fmtTime(e.end_min)}${e.note ? "\n" + e.note : ""}`}>
                     <b>{e.title}</b>
                     <span>{fmtTime(e.start_min)}–{fmtTime(e.end_min)}</span>
                     {e.note && (
