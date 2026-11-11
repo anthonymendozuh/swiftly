@@ -25,8 +25,9 @@ export async function POST(req) {
     const v = validateCall({ tool: row.tool, args });
     if (v.error || !v.tool.destructive) return json({ error: "Invalid pending action." }, 400);
     try {
-      const out = await v.tool.run(makeContext(sql, user), v.args);
-      await sql`update logs set status = 'confirmed', result = ${String(out)} where id = ${row.id}`;
+      const ctx = makeContext(sql, user);
+      const out = await v.tool.run(ctx, v.args);
+      await sql`update logs set status = 'confirmed', result = ${String(out)}, undo = ${ctx.undo ? JSON.stringify(ctx.undo) : null}::jsonb where id = ${row.id}`;
       return json({ status: "confirmed", result: String(out) });
     } catch (e) {
       await sql`update logs set status = 'error', result = ${e.message} where id = ${row.id}`;

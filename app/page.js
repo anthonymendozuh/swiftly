@@ -13,7 +13,10 @@ const EXAMPLES = [
   "Clear my Saturday.",
 ];
 
-const PROGRESS = ["Reading your week…", "Checking the forecast…", "Finding open time…", "Writing to your calendar…", "Double-checking…"];
+const PROGRESS = ["Reading your week…", "Checking the forecast…", "Checking air quality…", "Finding open time…", "Looking up trails…", "Writing to your calendar…", "Double-checking…"];
+
+const RECHECK =
+  "Recheck my week: pull the latest forecast and air quality, find any outdoor plans that now land on bad days, and move them. Tell me what changed.";
 
 const fmtTime = (min) => {
   const h = Math.floor(min / 60) % 24;
@@ -21,8 +24,10 @@ const fmtTime = (min) => {
   return `${((h + 11) % 12) + 1}${m ? ":" + String(m).padStart(2, "0") : ""}${h < 12 ? "a" : "p"}`;
 };
 
+const aqiClass = (a) => (a <= 50 ? "good" : a <= 100 ? "moderate" : "bad");
+
 const icon = (code) =>
-  code == null ? "" : code <= 1 ? "☀️" : code === 2 ? "⛅" : code === 3 ? "☁️" : code <= 48 ? "🌫️" : code >= 95 ? "⛈️" : code >= 71 && code <= 86 && ![80, 81, 82].includes(code) ? "🌨️" : "🌧️";
+  code == null ? "" : code <= 1 ? "☀️" : code === 2 ? "⛅" : code === 3 ? "☁️" : code <= 48 ? "☁️" : code >= 95 ? "⛈️" : code >= 71 && code <= 86 && ![80, 81, 82].includes(code) ? "🌨️" : "🌧️";
 
 async function api(path, body) {
   const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
@@ -129,11 +134,11 @@ function Planner({ week, reload, onLogout }) {
     return () => clearInterval(t);
   }, [busy]);
 
-  async function send(text) {
+  async function send(text, display) {
     const msg = text.trim();
     if (!msg || busy) return;
     const history = messages.slice(1).map(({ role, text }) => ({ role, text }));
-    setMessages((m) => [...m, { role: "user", text: msg }]);
+    setMessages((m) => [...m, { role: "user", text: msg, display }]);
     setInput("");
     setBusy(true);
     const r = await api("/api/agent", { message: msg, history });
@@ -157,6 +162,12 @@ function Planner({ week, reload, onLogout }) {
     reload();
   }
 
+  async function undo(id) {
+    const r = await api("/api/undo", { id });
+    setMessages((m) => [...m, { role: "assistant", text: r.ok ? `↩ Undone: ${r.data.result}` : r.data.error || "Couldn't undo that.", error: !r.ok }]);
+    reload();
+  }
+
   async function logout() {
     await api("/api/auth/logout", {});
     onLogout();
@@ -170,6 +181,7 @@ function Planner({ week, reload, onLogout }) {
         <Logo />
         <div className="top-meta">
           <span className="pill">📍 {week.user.city}</span>
+          <button className="btn accent" onClick={() => send(RECHECK, "↻ Recheck my week")} disabled={busy}>↻ Recheck my week</button>
           <a className="btn" href="/api/ics">Export to calendar</a>
           <button className="btn ghost" onClick={logout} title={week.user.email}>Log out</button>
         </div>
@@ -180,7 +192,7 @@ function Planner({ week, reload, onLogout }) {
           <div className="thread">
             {messages.map((m, i) => (
               <div key={i} className={`msg ${m.role}${m.error ? " err" : ""}`}>
-                <p>{m.text}</p>
+                <p>{m.display || m.text}</p>
                 {m.steps?.length > 0 && <Steps steps={m.steps} />}
               </div>
             ))}
@@ -236,7 +248,7 @@ function Planner({ week, reload, onLogout }) {
               <Calendar week={week} />
             </>
           ) : (
-            <Log logs={week.logs} />
+            <Log logs={week.logs} onUndo={undo} />
           )}
         </section>
       </div>
@@ -299,6 +311,12 @@ function Calendar({ week }) {
                 {icon(d.weather.code)} {d.weather.high}° <span>{d.weather.rain_chance}%</span>
               </div>
             )}
+            {d.weather && (d.weather.aqi != null || d.weather.uv != null) && (
+              <div className="air">
+                {d.weather.aqi != null && <span className={`aqi ${aqiClass(d.weather.aqi)}`}>AQI {d.weather.aqi}</span>}
+                {d.weather.uv != null && <span className={d.weather.uv >= 8 ? "uv hi" : "uv"}>UV {d.weather.uv}</span>}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -317,9 +335,14 @@ function Calendar({ week }) {
                 const top = ((Math.max(e.start_min, HOUR_START * 60) - HOUR_START * 60) / 60) * HOUR_PX;
                 const h = Math.max(((Math.min(e.end_min, HOUR_END * 60) - Math.max(e.start_min, HOUR_START * 60)) / 60) * HOUR_PX - 2, 18);
                 return (
-                  <div key={e.id} className={`ev ${e.kind === "fixed" ? "fixed" : e.category}`} style={{ top, height: h }} title={`${e.title} ${fmtTime(e.start_min)}–${fmtTime(e.end_min)}`}>
+                  <div key={e.id} className={`ev ${e.kind === "fixed" ? "fixed" : e.category}`} style={{ top, height: h }} title={`${e.title} ${fmtTime(e.start_min)}–${fmtTime(e.end_min)}${e.note ? "\n" + e.note : ""}`}>
                     <b>{e.title}</b>
                     <span>{fmtTime(e.start_min)}–{fmtTime(e.end_min)}</span>
+                    {e.note && (
+                      <a className="note" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.note.split(" · ")[0])}`} target="_blank" rel="noreferrer">
+                        🥾 {e.note}
+                      </a>
+                    )}
                   </div>
                 );
               })}
@@ -330,13 +353,13 @@ function Calendar({ week }) {
   );
 }
 
-function Log({ logs }) {
+function Log({ logs, onUndo }) {
   if (!logs.length) return <p className="muted pad">No actions yet. Everything the agent does will be recorded here.</p>;
   return (
     <div className="log">
       <table>
         <thead>
-          <tr><th>Time</th><th>Action</th><th>Status</th><th>Details</th></tr>
+          <tr><th>Time</th><th>Action</th><th>Status</th><th>Details</th><th /></tr>
         </thead>
         <tbody>
           {logs.map((l) => (
@@ -345,6 +368,7 @@ function Log({ logs }) {
               <td><code>{l.tool}</code></td>
               <td><span className={`badge ${l.status}`}>{l.status}</span></td>
               <td className="details">{l.result}</td>
+              <td>{l.can_undo && (l.status === "ok" || l.status === "confirmed") && <button className="undo" onClick={() => onUndo(l.id)}>Undo</button>}</td>
             </tr>
           ))}
         </tbody>

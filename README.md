@@ -5,7 +5,11 @@ tell it your schedule and to-dos in plain english. the agent checks the weather,
 ## what it does
 - natural language in: "work mon/wed 2-10pm, run 3x, long hike, study 4h"
 - agent loop (reason → act → observe), up to 8 steps per request
-- real actions: weather api calls, database writes (commitments, tasks, calendar blocks), moves, deletes, .ics export
+- real actions: weather + air quality api calls, trail search, database writes (commitments, tasks, calendar blocks, notes), moves, deletes, .ics export
+- air quality + uv aware: skips smoky days (aqi > 100), moves outdoor sessions out of high-uv midday
+- real trail suggestions for hikes (openstreetmap) attached to the calendar block, links to maps
+- "recheck my week": agent pulls the latest forecast + air quality, finds outdoor plans that went bad, moves them, and explains each move
+- undo for any agent change from the activity log
 - login per user, weekly calendar view, agent trace under every reply, activity log tab
 
 ## agent architecture
@@ -14,7 +18,8 @@ tell it your schedule and to-dos in plain english. the agent checks the weather,
 | llm integration (gemini, retries, model fallback, rate limits) | `lib/llm.js` |
 | prompt (persona, react loop, json template, rules, few-shot) | `lib/prompt.js` |
 | action interpreter / executor + tool registry | `lib/tools.js` |
-| agent loop | `lib/agent.js` |
+| agent loop (step + time budget) | `lib/agent.js` |
+| external data: weather, air quality, trails | `lib/weather.js`, `lib/trails.js` |
 | ui | `app/page.js` |
 
 ## safety
@@ -24,6 +29,7 @@ tell it your schedule and to-dos in plain english. the agent checks the weather,
 - destructive tools (`delete_event`, `clear_day`, `delete_task`) never run directly. they become a pending action that the user confirms in a popup (expires in 15 min)
 - outdoor slots get weather warnings (rain, heat, darkness) fed back to the agent
 - every request, action, block, error, confirm and cancel is written to the `logs` table (activity log tab)
+- reversible actions save an undo payload; undo checks ownership and can only run once
 - per-user request throttle
 
 ## run it
